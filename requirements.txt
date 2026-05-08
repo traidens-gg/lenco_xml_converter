@@ -1,0 +1,5 @@
+streamlit>=1.36.0
+python-dotenv>=1.0.1
+lxml>=5.2.0
+factur-x>=4.2
+reportlab>=4.2.0
