@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+from pathlib import Path
 import traceback
 from typing import Any
 
@@ -27,6 +29,8 @@ from zugferd_builder import (
 APP_TITLE = "lenco .xml -> ZUGFeRD converter"
 DOWNLOAD_PDF_NAME = "zugferd_invoice.pdf"
 DOWNLOAD_REPORT_NAME = "conversion_report.txt"
+LOGO_URL = "https://i.ibb.co/H0HpVBd/Logo-Neu.png"
+LOGO_PATH = Path(__file__).parent / "assets" / "logo_Lenco.svg"
 
 PRIVACY_DISCLAIMER = """
 Datenschutzhinweis: Die Verarbeitung erfolgt ausschließlich zur technischen Konvertierung
@@ -52,15 +56,15 @@ def _init_state() -> None:
         st.session_state.setdefault(key, value)
 
 
-def _clear_session_data() -> None:
-    """Remove temporary conversion data from the current Streamlit session.
+def _clear_generated_session_data_after_download() -> None:
+    """Clear generated in-memory files after the PDF download is triggered.
 
-    The app never writes uploaded XML or generated documents to persistent
-    storage. This function clears the in-memory objects that are kept only so
-    the user can download the generated PDF or error report.
+    The uploaded file widget may still visually show the selected file in the
+    browser. Keeping file_hash prevents an immediate re-processing loop after
+    Streamlit reruns, while generated PDF/report bytes are removed from session
+    state.
     """
-    st.session_state.file_hash = None
-    st.session_state.status = "idle"
+    st.session_state.status = "downloaded"
     st.session_state.pdf_bytes = None
     st.session_state.report_text = None
     st.session_state.warnings = []
@@ -71,6 +75,21 @@ def _uploaded_file_hash(file_name: str, data: bytes) -> str:
     digest.update(file_name.encode("utf-8", errors="ignore"))
     digest.update(data)
     return digest.hexdigest()
+
+
+
+def _logo_src() -> str:
+    """Return the external LENCO logo URL, with local SVG fallback."""
+    if LOGO_URL:
+        return LOGO_URL
+
+    try:
+        svg_bytes = LOGO_PATH.read_bytes()
+    except FileNotFoundError:
+        return ""
+
+    encoded = base64.b64encode(svg_bytes).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
 
 
 def _detect_requested_level(invoice_data: dict[str, Any]) -> str:
@@ -98,16 +117,16 @@ def _inject_css() -> None:
 
             .stApp {
                 background:
-                    radial-gradient(circle at 50% 0%, rgba(138, 43, 43, 0.10), transparent 34%),
+                    radial-gradient(circle at 50% 0%, rgba(138, 43, 43, 0.08), transparent 30%),
                     linear-gradient(180deg, #FBFAF8 0%, var(--lenco-bg) 100%);
                 color: var(--lenco-text);
                 font-family: Arial, Helvetica, sans-serif;
             }
 
             .block-container {
-                max-width: 940px;
-                padding-top: 2.4rem;
-                padding-bottom: 3rem;
+                max-width: 1120px;
+                padding-top: 0.85rem;
+                padding-bottom: 1.25rem;
                 margin-left: auto;
                 margin-right: auto;
             }
@@ -126,50 +145,44 @@ def _inject_css() -> None:
             }
 
             .sidebar-brand {
-                padding: 0.35rem 0 1.2rem 0;
+                padding: 0.15rem 0 0.85rem 0;
                 border-bottom: 1px solid var(--lenco-line);
-                margin-bottom: 1.2rem;
+                margin-bottom: 0.9rem;
                 text-align: center;
             }
 
-            .sidebar-brand-logo {
-                font-size: 2.2rem;
-                line-height: 1;
-                font-weight: 800;
-                letter-spacing: -0.07em;
+            .sidebar-brand-logo-img {
+                width: 132px;
+                max-width: 82%;
+                height: auto;
+                display: block;
+                margin: 0 auto;
             }
 
-            .brand-len {
-                color: var(--lenco-anthracite);
-            }
-
-            .brand-co {
-                color: var(--lenco-bordeaux);
-            }
 
             .sidebar-brand-subline {
-                margin-top: 0.35rem;
+                margin-top: 0.28rem;
                 color: var(--lenco-muted);
-                font-size: 0.78rem;
-                letter-spacing: 0.14em;
+                font-size: 0.72rem;
+                letter-spacing: 0.13em;
                 text-transform: uppercase;
             }
 
             .sidebar-section-title {
-                margin: 0 0 0.65rem 0;
+                margin: 0 0 0.45rem 0;
                 color: var(--lenco-anthracite);
                 font-weight: 700;
-                font-size: 0.95rem;
+                font-size: 0.9rem;
                 text-align: center;
             }
 
             .hero-card {
                 background: var(--lenco-card);
                 border: 1px solid var(--lenco-line);
-                border-radius: 28px;
-                padding: 2.35rem 2.25rem 2.1rem 2.25rem;
-                box-shadow: 0 22px 55px rgba(85, 85, 85, 0.10);
-                margin: 0 auto 1.25rem auto;
+                border-radius: 22px;
+                padding: 1.05rem 1.65rem 0.95rem 1.65rem;
+                box-shadow: 0 14px 34px rgba(85, 85, 85, 0.08);
+                margin: 0 auto 0.7rem auto;
                 position: relative;
                 overflow: hidden;
                 text-align: center;
@@ -180,26 +193,25 @@ def _inject_css() -> None:
                 position: absolute;
                 top: 0;
                 left: 0;
-                width: 7px;
+                width: 6px;
                 height: 100%;
                 background: var(--lenco-bordeaux);
             }
 
-            .brand-wordmark {
-                font-size: 2.25rem;
-                font-weight: 800;
-                letter-spacing: -0.075em;
-                line-height: 1;
-                margin-bottom: 1.05rem;
-                text-align: center;
+            .brand-logo-img {
+                width: 128px;
+                max-width: 42%;
+                height: auto;
+                display: block;
+                margin: 0 auto 0.65rem auto;
             }
 
             .hero-title {
                 color: var(--lenco-anthracite);
-                font-size: clamp(2rem, 4vw, 3.15rem);
+                font-size: clamp(1.7rem, 3vw, 2.35rem);
                 font-weight: 800;
                 letter-spacing: -0.045em;
-                line-height: 1.04;
+                line-height: 1.05;
                 margin: 0 auto;
                 text-align: center;
             }
@@ -210,10 +222,10 @@ def _inject_css() -> None:
 
             .hero-subtitle {
                 color: var(--lenco-muted);
-                font-size: 1.02rem;
-                line-height: 1.55;
-                max-width: 760px;
-                margin: 1.05rem auto 0 auto;
+                font-size: 0.92rem;
+                line-height: 1.42;
+                max-width: 980px;
+                margin: 0.65rem auto 0 auto;
                 text-align: center;
             }
 
@@ -221,46 +233,47 @@ def _inject_css() -> None:
                 background: #FFFFFF;
                 border: 1px solid var(--lenco-line);
                 border-left: 5px solid var(--lenco-bordeaux);
-                border-radius: 18px;
-                padding: 1rem 1.1rem;
+                border-radius: 16px;
+                padding: 0.68rem 0.9rem;
                 color: var(--lenco-muted);
-                line-height: 1.5;
-                margin: 0 auto 1.35rem auto;
+                line-height: 1.38;
+                margin: 0 auto 0.7rem auto;
                 text-align: center;
-                box-shadow: 0 10px 24px rgba(85, 85, 85, 0.04);
+                font-size: 0.88rem;
+                box-shadow: 0 8px 18px rgba(85, 85, 85, 0.035);
             }
 
             .upload-head-card {
                 background: var(--lenco-card);
                 border: 1px solid var(--lenco-line);
-                border-radius: 24px;
-                padding: 1.45rem 1.4rem 1.25rem 1.4rem;
-                box-shadow: 0 14px 35px rgba(85, 85, 85, 0.07);
-                margin: 1rem auto 1rem auto;
+                border-radius: 20px;
+                padding: 0.75rem 1.35rem 0.68rem 1.35rem;
+                box-shadow: 0 10px 24px rgba(85, 85, 85, 0.055);
+                margin: 0.65rem auto 0.55rem auto;
                 text-align: center;
             }
 
             .upload-title {
                 color: var(--lenco-anthracite);
                 font-weight: 800;
-                font-size: 1.25rem;
-                margin: 0 0 0.35rem 0;
+                font-size: 1.08rem;
+                margin: 0 0 0.25rem 0;
                 text-align: center;
             }
 
             .upload-caption {
                 color: var(--lenco-muted);
-                font-size: 0.98rem;
+                font-size: 0.88rem;
                 margin: 0 auto;
-                max-width: 650px;
+                max-width: 960px;
                 text-align: center;
-                line-height: 1.5;
+                line-height: 1.38;
             }
 
             .upload-arrow {
-                width: 52px;
-                height: 52px;
-                margin: 1rem auto 0 auto;
+                width: 38px;
+                height: 38px;
+                margin: 0.55rem auto 0 auto;
                 border-radius: 50%;
                 background: rgba(138, 43, 43, 0.10);
                 border: 1px solid rgba(138, 43, 43, 0.25);
@@ -268,25 +281,26 @@ def _inject_css() -> None:
                 align-items: center;
                 justify-content: center;
                 color: var(--lenco-bordeaux);
-                font-size: 1.75rem;
+                font-size: 1.25rem;
                 font-weight: 900;
             }
 
             div[data-testid="stFileUploader"] {
-                max-width: 880px;
+                max-width: 1120px;
                 margin-left: auto;
                 margin-right: auto;
+                margin-bottom: 0.55rem;
             }
 
             div[data-testid="stFileUploader"] section {
                 border: 2px dashed rgba(138, 43, 43, 0.45) !important;
                 background:
-                    linear-gradient(180deg, rgba(138, 43, 43, 0.035), rgba(255, 255, 255, 0.92)),
+                    linear-gradient(180deg, rgba(138, 43, 43, 0.03), rgba(255, 255, 255, 0.95)),
                     #FFFFFF !important;
-                border-radius: 24px !important;
-                min-height: 172px;
-                padding: 2rem 1.4rem !important;
-                box-shadow: 0 16px 38px rgba(138, 43, 43, 0.08);
+                border-radius: 22px !important;
+                min-height: 104px;
+                padding: 0.85rem 1.4rem !important;
+                box-shadow: 0 12px 28px rgba(138, 43, 43, 0.07);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -296,7 +310,7 @@ def _inject_css() -> None:
             div[data-testid="stFileUploader"] section:hover {
                 border-color: var(--lenco-bordeaux) !important;
                 background:
-                    linear-gradient(180deg, rgba(138, 43, 43, 0.06), rgba(255, 255, 255, 0.96)),
+                    linear-gradient(180deg, rgba(138, 43, 43, 0.055), rgba(255, 255, 255, 0.96)),
                     #FFFFFF !important;
             }
 
@@ -312,26 +326,27 @@ def _inject_css() -> None:
             div[data-testid="stFileUploaderDropzoneInstructions"] span,
             div[data-testid="stFileUploaderDropzoneInstructions"] small {
                 color: var(--lenco-muted) !important;
-                font-size: 0.95rem !important;
+                font-size: 0.9rem !important;
             }
 
             div[data-testid="stFileUploader"] button {
                 background: var(--lenco-bordeaux) !important;
                 color: #FFFFFF !important;
                 border: 1px solid var(--lenco-bordeaux) !important;
-                border-radius: 14px !important;
-                padding: 0.75rem 1.25rem !important;
+                border-radius: 13px !important;
+                padding: 0.62rem 1.05rem !important;
                 font-weight: 800 !important;
-                box-shadow: 0 12px 24px rgba(138, 43, 43, 0.18);
+                box-shadow: 0 10px 20px rgba(138, 43, 43, 0.16);
             }
 
             .status-card {
-                border-radius: 18px;
-                padding: 1rem 1.15rem;
-                margin: 1rem auto;
+                border-radius: 16px;
+                padding: 0.72rem 1rem;
+                margin: 0.55rem auto 0.55rem auto;
                 border: 1px solid transparent;
                 font-weight: 700;
                 text-align: center;
+                font-size: 0.95rem;
             }
 
             .status-success {
@@ -346,17 +361,23 @@ def _inject_css() -> None:
                 color: #9F1D1D;
             }
 
+            .status-neutral {
+                background: #F1F5F9;
+                border-color: #D7DEE8;
+                color: #334155;
+            }
+
             .privacy-disclaimer {
-                max-width: 880px;
-                margin: 1.6rem auto 0 auto;
+                max-width: 1120px;
+                margin: 0.75rem auto 0 auto;
                 background: #FFFFFF;
                 border: 1px solid var(--lenco-line);
-                border-radius: 18px;
-                padding: 1rem 1.15rem;
+                border-radius: 14px;
+                padding: 0.62rem 0.8rem;
                 color: var(--lenco-muted);
-                font-size: 0.92rem;
-                line-height: 1.55;
-                box-shadow: 0 10px 24px rgba(85, 85, 85, 0.04);
+                font-size: 0.76rem;
+                line-height: 1.35;
+                box-shadow: 0 8px 18px rgba(85, 85, 85, 0.035);
                 text-align: left;
             }
 
@@ -364,14 +385,10 @@ def _inject_css() -> None:
                 color: var(--lenco-anthracite);
             }
 
-            .cleanup-area {
-                max-width: 880px;
-                margin: 0.8rem auto 0 auto;
-                text-align: center;
-            }
-
             div[data-testid="stDownloadButton"] {
                 text-align: center;
+                margin-top: 0.25rem;
+                margin-bottom: 0.35rem;
             }
 
             div[data-testid="stDownloadButton"] button,
@@ -380,9 +397,9 @@ def _inject_css() -> None:
                 color: #FFFFFF;
                 border: 1px solid var(--lenco-bordeaux);
                 border-radius: 14px;
-                padding: 0.72rem 1rem;
+                padding: 0.65rem 0.95rem;
                 font-weight: 750;
-                box-shadow: 0 12px 25px rgba(138, 43, 43, 0.18);
+                box-shadow: 0 10px 20px rgba(138, 43, 43, 0.16);
                 transition: all 0.15s ease-in-out;
             }
 
@@ -396,44 +413,63 @@ def _inject_css() -> None:
 
             div[data-testid="stExpander"] {
                 border: 1px solid var(--lenco-line);
-                border-radius: 16px;
+                border-radius: 14px;
                 background: #FFFFFF;
-                box-shadow: 0 10px 24px rgba(85, 85, 85, 0.05);
+                box-shadow: 0 8px 18px rgba(85, 85, 85, 0.04);
                 overflow: hidden;
-                max-width: 880px;
-                margin-left: auto;
-                margin-right: auto;
+                max-width: 1120px;
+                margin: 0.45rem auto;
             }
 
             div[data-testid="stAlert"] {
                 border-radius: 14px;
                 border: 1px solid rgba(138, 43, 43, 0.18);
-                max-width: 880px;
+                max-width: 1120px;
                 margin-left: auto;
                 margin-right: auto;
+                padding-top: 0.55rem;
+                padding-bottom: 0.55rem;
             }
 
             .stCheckbox label {
                 font-weight: 600;
             }
 
+
+            @media (min-width: 1200px) {
+                .block-container {
+                    max-width: 1180px;
+                }
+
+                div[data-testid="stFileUploader"],
+                div[data-testid="stExpander"],
+                div[data-testid="stAlert"],
+                .privacy-disclaimer {
+                    max-width: 1120px;
+                }
+            }
+
             @media (max-width: 760px) {
                 .block-container {
-                    padding-top: 1.2rem;
+                    padding-top: 0.7rem;
                 }
 
                 .hero-card {
-                    padding: 1.55rem 1.35rem 1.25rem 1.35rem;
-                    border-radius: 22px;
+                    padding: 1rem 1rem 0.9rem 1rem;
+                    border-radius: 20px;
                 }
 
-                .brand-wordmark {
-                    font-size: 1.8rem;
-                }
+                .brand-logo-img {
+                width: 128px;
+                max-width: 42%;
+                height: auto;
+                display: block;
+                margin: 0 auto 0.65rem auto;
+            }
 
                 div[data-testid="stFileUploader"] section {
-                    min-height: 150px;
-                    padding: 1.5rem 1rem !important;
+                    min-height: 108px;
+                    padding: 0.9rem 0.8rem !important;
                 }
             }
         </style>
@@ -443,11 +479,18 @@ def _inject_css() -> None:
 
 
 def _render_sidebar() -> tuple[bool, bool]:
+    logo_uri = _logo_src()
+    logo_html = (
+        f'<img class="sidebar-brand-logo-img" src="{logo_uri}" alt="LENCO Logo" />'
+        if logo_uri
+        else '<strong>lenco</strong>'
+    )
+
     with st.sidebar:
         st.markdown(
-            """
+            f"""
             <div class="sidebar-brand">
-                <div class="sidebar-brand-logo"><span class="brand-len">len</span><span class="brand-co">co</span></div>
+                {logo_html}
                 <div class="sidebar-brand-subline">financial consulting</div>
             </div>
             <div class="sidebar-section-title">Technische Prüfung</div>
@@ -473,10 +516,17 @@ def _render_sidebar() -> tuple[bool, bool]:
 
 
 def _render_hero() -> None:
+    logo_uri = _logo_src()
+    logo_html = (
+        f'<img class="brand-logo-img" src="{logo_uri}" alt="LENCO Logo" />'
+        if logo_uri
+        else ""
+    )
+
     st.markdown(
-        """
+        f"""
         <div class="hero-card">
-            <div class="brand-wordmark"><span class="brand-len">len</span><span class="brand-co">co</span></div>
+            {logo_html}
             <h1 class="hero-title">.xml <span class="accent">-></span> ZUGFeRD converter</h1>
             <p class="hero-subtitle">
                 XML-Rechnungen lokal prüfen, als klare PDF-Rechnung rendern
@@ -663,8 +713,7 @@ def main() -> None:
         <div class="upload-head-card">
             <div class="upload-title">XML-Rechnung hier hochladen</div>
             <div class="upload-caption">
-                Ziehe deine XML-Datei in das Upload-Feld oder klicke auf den Upload-Button.
-                Danach startet die Konvertierung automatisch.
+                XML-Datei in das Feld ziehen oder Upload klicken. Die Konvertierung startet automatisch.
             </div>
             <div class="upload-arrow">↓</div>
         </div>
@@ -680,7 +729,10 @@ def main() -> None:
     )
 
     if uploaded_file is None:
-        st.info("Warte auf eine `.xml`-Datei.")
+        st.markdown(
+            '<div class="status-card status-neutral">Warte auf eine .xml-Datei.</div>',
+            unsafe_allow_html=True,
+        )
         _render_privacy_disclaimer()
         return
 
@@ -718,16 +770,17 @@ def main() -> None:
             data=st.session_state.pdf_bytes,
             file_name=DOWNLOAD_PDF_NAME,
             mime="application/pdf",
+            on_click=_clear_generated_session_data_after_download,
         )
 
         with st.expander("Technischen Prüfbericht anzeigen"):
             st.text(st.session_state.report_text or "")
 
-        st.markdown('<div class="cleanup-area">', unsafe_allow_html=True)
-        if st.button("Sitzungsdaten löschen", key="clear_success"):
-            _clear_session_data()
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+    elif st.session_state.status == "downloaded":
+        st.markdown(
+            '<div class="status-card status-neutral">Download gestartet. Temporäre PDF- und Berichtsdaten wurden aus der Session entfernt.</div>',
+            unsafe_allow_html=True,
+        )
 
     elif st.session_state.status == "error":
         st.markdown(
@@ -743,12 +796,6 @@ def main() -> None:
 
         with st.expander("Fehlerbericht anzeigen"):
             st.text(st.session_state.report_text or "")
-
-        st.markdown('<div class="cleanup-area">', unsafe_allow_html=True)
-        if st.button("Sitzungsdaten löschen", key="clear_error"):
-            _clear_session_data()
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
     _render_privacy_disclaimer()
 
